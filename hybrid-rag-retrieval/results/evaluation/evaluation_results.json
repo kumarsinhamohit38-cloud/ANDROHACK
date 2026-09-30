@@ -1,0 +1,29 @@
+{
+  "dense": {
+    "recall_at_k": 0.95,
+    "precision_at_k": 0.19,
+    "mrr": 0.6792,
+    "context_precision": 0.19,
+    "context_recall": 0.95,
+    "n_queries": 20
+  },
+  "bm25": {
+    "recall_at_k": 0.85,
+    "precision_at_k": 0.17,
+    "mrr": 0.5817,
+    "context_precision": 0.17,
+    "context_recall": 0.85,
+    "n_queries": 20
+  },
+  "hybrid": {
+    "recall_at_k": 0.9,
+    "precision_at_k": 0.18,
+    "mrr": 0.6808,
+    "context_precision": 0.18,
+    "context_recall": 0.9,
+    "n_queries": 20
+  },
+  "table": "---------------------------------------------------------------------------------------\nMethod       | Recall@5     | Precision@5    | MRR      | Ctx Precision  | Ctx Recall  \n---------------------------------------------------------------------------------------\nDense        | 0.9500       | 0.1900         | 0.6792   | 0.1900         | 0.9500      \nBM25         | 0.8500       | 0.1700         | 0.5817   | 0.1700         | 0.8500      \nHybrid       | 0.9000       | 0.1800         | 0.6808   | 0.1800         | 0.9000      \n---------------------------------------------------------------------------------------",
+  "k": 5,
+  "n_queries_evaluated": 20
+}

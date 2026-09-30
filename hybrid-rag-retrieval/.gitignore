@@ -1,0 +1,47 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints
+*.ipynb
+
+# ── Environment variables ─────────────────────────────────────────────────────
+.env
+*.env.local
+
+# ── Data (large files – download separately) ──────────────────────────────────
+data/raw/
+data/processed/
+
+# ── Indexes (regenerate with build_indexes.py) ────────────────────────────────
+indexes/
+
+# ── HuggingFace model cache ───────────────────────────────────────────────────
+.cache/
+~/.cache/huggingface/
+
+# ── Results (can regenerate) ──────────────────────────────────────────────────
+# results/   # keep this – evaluation/benchmark results are useful
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
