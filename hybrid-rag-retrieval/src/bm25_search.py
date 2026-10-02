@@ -22,6 +22,24 @@ from src.utils import get_logger
 
 logger = get_logger(__name__)
 
+# Ignore question grammar during keyword search. Keeping words such as
+# "is", "an", and "what" lets unrelated passages match simple questions.
+_QUERY_STOPWORDS = frozenset({
+    "a", "about", "above", "after", "again", "against", "all", "am", "an",
+    "and", "any", "are", "as", "at", "be", "because", "been", "before",
+    "being", "below", "between", "both", "but", "by", "can", "could", "did",
+    "do", "does", "doing", "down", "during", "each", "few", "for", "from",
+    "further", "had", "has", "have", "having", "he", "her", "here", "hers",
+    "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is",
+    "it", "its", "itself", "just", "me", "more", "most", "my", "myself", "no",
+    "nor", "not", "of", "off", "on", "once", "only", "or", "other", "our",
+    "ours", "ourselves", "out", "over", "own", "same", "she", "should", "so",
+    "some", "such", "than", "that", "the", "their", "theirs", "them", "themselves",
+    "then", "there", "these", "they", "this", "those", "through", "to", "too",
+    "under", "until", "up", "very", "was", "we", "were", "what", "when", "where",
+    "which", "while", "who", "whom", "why", "will", "with", "would", "you", "your",
+})
+
 
 class BM25Retriever:
     """
@@ -152,7 +170,10 @@ class BM25Retriever:
                 "Call .build(passages) or .load() first."
             )
 
-        query_tokens = tokenize(query)
+        query_tokens = [
+            token for token in tokenize(query)
+            if token not in _QUERY_STOPWORDS
+        ]
         if not query_tokens:
             logger.warning("Empty query after tokenisation. Returning empty results.")
             return []
@@ -167,6 +188,10 @@ class BM25Retriever:
         results = []
         rank = 1
         for idx in ranked_indices:
+            # BM25 can return zero-score documents when no query terms match.
+            # Do not treat those as keyword evidence in hybrid fusion.
+            if scores[idx] <= 0:
+                break
             if rank > top_k:
                 break
 

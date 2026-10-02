@@ -105,7 +105,7 @@ class HybridRetriever:
         # ── Step 1: Dense retrieval ────────────────────────────────────
         t0 = time.perf_counter()
         dense_results = self.dense_retriever.search(
-            query, top_k=self.dense_top_k
+            query, top_k=self.dense_top_k, metadata_filter=metadata_filter
         )
         timings["dense_ms"] = (time.perf_counter() - t0) * 1000
         dense_ids = [r["document_id"] for r in dense_results]
@@ -115,7 +115,7 @@ class HybridRetriever:
         # ── Step 2: BM25 retrieval ─────────────────────────────────────
         t0 = time.perf_counter()
         bm25_results = self.bm25_retriever.search(
-            query, top_k=self.bm25_top_k
+            query, top_k=self.bm25_top_k, metadata_filter=metadata_filter
         )
         timings["bm25_ms"] = (time.perf_counter() - t0) * 1000
         bm25_ids = [r["document_id"] for r in bm25_results]
@@ -128,6 +128,12 @@ class HybridRetriever:
             rankings=[dense_ids, bm25_ids],
             k=self.rrf_k,
         )
+        # If BM25 found passages containing informative query terms, keep the
+        # hybrid candidate set grounded in those matches. This prevents weak
+        # semantic neighbors from filling the results with another topic.
+        if bm25_ids:
+            keyword_matches = set(bm25_ids)
+            fused = [item for item in fused if item["document_id"] in keyword_matches]
         timings["rrf_ms"] = (time.perf_counter() - t0) * 1000
 
         # ── Step 4: Fetch full passage information ─────────────────────

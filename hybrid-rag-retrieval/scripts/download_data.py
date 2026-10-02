@@ -15,9 +15,8 @@ from pathlib import Path
 # Make 'src' importable from scripts/
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import DEMO_SIZE, FULL_DATASET_SIZE, PROCESSED_DIR
+from src.config import DEMO_SIZE, FULL_DATASET_SIZE, RAW_DATA_DIR
 from src.data_loader import load_ms_marco
-from src.preprocessing import preprocess_passages
 from src.utils import get_logger, save_jsonl
 
 logger = get_logger("download_data")
@@ -51,17 +50,15 @@ def main():
     # Step 1: Download raw passages
     passages = load_ms_marco(size=size, mode=args.mode)
 
-    # Step 2: Preprocess
-    processed = preprocess_passages(passages)
+    # Save MS MARCO separately so it can be combined with other topic files.
+    RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = RAW_DATA_DIR / "ms_marco.jsonl"
+    save_jsonl(passages, out_path)
 
-    # Step 3: Save to disk
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = PROCESSED_DIR / "passages.jsonl"
-    save_jsonl(processed, out_path)
-
-    print(f"\n[OK] Saved {len(processed)} passages to: {out_path}")
-    print("\nNext step:")
-    print("  python scripts/build_indexes.py")
+    print(f"\n[OK] Saved {len(passages)} raw passages to: {out_path}")
+    print("\nNext steps:")
+    print("  python scripts/preprocess_data.py")
+    print("  python scripts/build_indexes.py --recreate")
 
 
 if __name__ == "__main__":
