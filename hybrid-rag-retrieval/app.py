@@ -10,6 +10,7 @@ import json
 import html
 import re
 import sqlite3
+import hashlib
 from pathlib import Path
 
 import streamlit as st
@@ -22,6 +23,7 @@ from src.config import (
     PASSAGES_FILE, BM25_INDEX_PATH, VECTOR_DB_PATH,
 )
 from src.answering import compose_grounded_answer
+from src.user_documents import prepare_uploaded_document, search_uploaded_documents
 
 # ── Page configuration ────────────────────────────────────────────────────────
 st.set_page_config(
@@ -195,6 +197,14 @@ def open_search(query: str) -> None:
     st.session_state.run_loaded_query = True
 
 
+def clear_uploaded_documents() -> None:
+    """Clear this session's uploaded files and reset the uploader widget."""
+    st.session_state.uploaded_documents = {}
+    st.session_state.document_upload_version = st.session_state.get("document_upload_version", 0) + 1
+    if st.session_state.get("search_scope") == "Uploaded documents":
+        st.session_state.search_scope = "Knowledge library"
+
+
 def get_metadata_values(field: str) -> list[str]:
     """Find filter values present in the processed corpus."""
     if not PASSAGES_FILE.exists():
@@ -219,6 +229,8 @@ def main():
     st.session_state.setdefault("search_history", [])
     st.session_state.setdefault("saved_searches", load_saved_searches())
     st.session_state.setdefault("query_input", st.session_state.get("last_query", ""))
+    st.session_state.setdefault("uploaded_documents", {})
+    st.session_state.setdefault("document_upload_version", 0)
 
     all_ready, missing = check_setup()
     source_values = get_metadata_values("source")
@@ -230,6 +242,57 @@ def main():
             unsafe_allow_html=True,
         )
         st.caption("Search your knowledge library")
+        st.markdown("##### YOUR DOCUMENTS")
+        uploads_before = bool(st.session_state.uploaded_documents)
+        upload_key = f"document_upload_{st.session_state.document_upload_version}"
+        uploaded_files = st.file_uploader(
+            "Add files for this session",
+            type=["pdf", "txt", "md", "csv", "docx", "css", "html", "htm", "py", "js", "json"],
+            accept_multiple_files=True,
+            key=upload_key,
+            help="PDFs, Word files, spreadsheets as CSV, and text or code files are supported.",
+        )
+        if uploaded_files:
+            new_document_added = False
+            for uploaded_file in uploaded_files:
+                content = uploaded_file.getvalue()
+                fingerprint = hashlib.sha256(content).hexdigest()
+                if fingerprint in st.session_state.uploaded_documents:
+                    continue
+                try:
+                    with st.spinner(f"Reading {uploaded_file.name}…"):
+                        model = load_embedding_model()
+                        document = prepare_uploaded_document(uploaded_file.name, content, model)
+                    st.session_state.uploaded_documents[document["fingerprint"]] = document
+                    new_document_added = True
+                    st.success(f"Added {document['filename']} · {len(document['chunks'])} passages")
+                except Exception as exc:
+                    st.error(f"Could not read {uploaded_file.name}: {exc}")
+            if new_document_added and not uploads_before:
+                st.session_state.search_scope = "Uploaded documents"
+        if st.session_state.uploaded_documents:
+            st.caption(
+                f"{len(st.session_state.uploaded_documents)} uploaded file(s) ready. "
+                "Uploads stay in this browser session only."
+            )
+            st.button(
+                "Clear uploaded files",
+                key="clear_uploaded_documents",
+                on_click=clear_uploaded_documents,
+            )
+        elif st.session_state.get("search_scope") == "Uploaded documents":
+            st.session_state.search_scope = "Knowledge library"
+
+        scope_options = ["Knowledge library"]
+        if st.session_state.uploaded_documents:
+            scope_options.append("Uploaded documents")
+        search_scope = st.radio(
+            "Search in",
+            scope_options,
+            key="search_scope",
+            help="Choose the main library or only the files uploaded above.",
+        )
+
         st.markdown("##### WORKSPACE")
         active_page = st.radio(
             "Navigation",
@@ -264,7 +327,7 @@ def main():
     st.markdown(
         '<div class="eyebrow">YOUR KNOWLEDGE WORKSPACE</div>'
         '<div class="hero-title">Find a clear answer.</div>'
-        '<div class="hero-copy">Search your technical library and explore the passages behind each match.</div>',
+        '<div class="hero-copy">Search your knowledge library or uploaded files and explore the passages behind each match.</div>',
         unsafe_allow_html=True,
     )
 
@@ -310,7 +373,7 @@ def main():
             )
         return
 
-    if not all_ready:
+    if not all_ready and search_scope == "Knowledge library":
         st.warning("Search indexes are missing or out of date. Follow the specific instruction below, then restart the app.")
         for item in missing:
             st.caption(item)
@@ -343,55 +406,73 @@ def main():
         "rrf_k": rrf_k,
         "filter": metadata_filter,
         "compare": compare_mode,
+        "scope": search_scope,
+        "uploaded_documents": tuple(sorted(st.session_state.uploaded_documents)),
     }
 
     if should_search:
         if not query.strip():
             st.info("Enter a question or a few keywords to search your library.")
             return
-        if not all_ready:
+        if search_scope == "Uploaded documents" and not st.session_state.uploaded_documents:
+            st.warning("Upload at least one document before choosing uploaded-document search.")
+            return
+        if search_scope == "Knowledge library" and not all_ready:
             st.warning("Search indexes are missing. Build them before searching.")
             return
 
         try:
-            from src.dense_search import DenseRetriever
-            from src.hybrid_search import HybridRetriever
-
-            embedding_model = load_embedding_model()
-            vector_store = load_vector_store()
-            bm25_retriever = load_bm25_retriever()
-            dense_retriever = DenseRetriever(vector_store=vector_store, embedding_model=embedding_model)
-            hybrid_retriever = HybridRetriever(
-                dense_retriever=dense_retriever,
-                bm25_retriever=bm25_retriever,
-                vector_store=vector_store,
-                dense_top_k=dense_top_k,
-                bm25_top_k=bm25_top_k,
-                final_top_k=final_top_k,
-                rrf_k=rrf_k,
-            )
-
             comparison = {}
             started = time.perf_counter()
-            with st.spinner("Searching your library…"):
-                if compare_mode or retrieval_method == "Dense Search":
-                    t0 = time.perf_counter()
-                    comparison["Dense Search"] = (
-                        dense_retriever.search(query, top_k=final_top_k, metadata_filter=metadata_filter),
-                        (time.perf_counter() - t0) * 1000,
+            if search_scope == "Uploaded documents":
+                embedding_model = load_embedding_model()
+                with st.spinner("Searching your uploaded files…"):
+                    results = search_uploaded_documents(
+                        query,
+                        st.session_state.uploaded_documents,
+                        embedding_model,
+                        top_k=final_top_k,
                     )
-                if compare_mode or retrieval_method == "BM25 Keyword":
-                    t0 = time.perf_counter()
-                    comparison["BM25 Keyword"] = (
-                        bm25_retriever.search(query, top_k=final_top_k, metadata_filter=metadata_filter),
-                        (time.perf_counter() - t0) * 1000,
-                    )
-                if compare_mode or retrieval_method == "Hybrid RRF":
-                    response = hybrid_retriever.search(query, metadata_filter=metadata_filter)
-                    comparison["Hybrid RRF"] = (response["results"], response["latency"].get("total_ms", 0.0))
+                primary_method = "Uploaded documents"
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                comparison[primary_method] = (results, elapsed_ms)
+            else:
+                from src.dense_search import DenseRetriever
+                from src.hybrid_search import HybridRetriever
 
-            primary_method = "Hybrid RRF" if "Hybrid RRF" in comparison else retrieval_method
-            results, elapsed_ms = comparison[primary_method]
+                embedding_model = load_embedding_model()
+                vector_store = load_vector_store()
+                bm25_retriever = load_bm25_retriever()
+                dense_retriever = DenseRetriever(vector_store=vector_store, embedding_model=embedding_model)
+                hybrid_retriever = HybridRetriever(
+                    dense_retriever=dense_retriever,
+                    bm25_retriever=bm25_retriever,
+                    vector_store=vector_store,
+                    dense_top_k=dense_top_k,
+                    bm25_top_k=bm25_top_k,
+                    final_top_k=final_top_k,
+                    rrf_k=rrf_k,
+                )
+
+                with st.spinner("Searching your library…"):
+                    if compare_mode or retrieval_method == "Dense Search":
+                        t0 = time.perf_counter()
+                        comparison["Dense Search"] = (
+                            dense_retriever.search(query, top_k=final_top_k, metadata_filter=metadata_filter),
+                            (time.perf_counter() - t0) * 1000,
+                        )
+                    if compare_mode or retrieval_method == "BM25 Keyword":
+                        t0 = time.perf_counter()
+                        comparison["BM25 Keyword"] = (
+                            bm25_retriever.search(query, top_k=final_top_k, metadata_filter=metadata_filter),
+                            (time.perf_counter() - t0) * 1000,
+                        )
+                    if compare_mode or retrieval_method == "Hybrid RRF":
+                        response = hybrid_retriever.search(query, metadata_filter=metadata_filter)
+                        comparison["Hybrid RRF"] = (response["results"], response["latency"].get("total_ms", 0.0))
+
+                primary_method = "Hybrid RRF" if "Hybrid RRF" in comparison else retrieval_method
+                results, elapsed_ms = comparison[primary_method]
             if compare_mode:
                 elapsed_ms = (time.perf_counter() - started) * 1000
             st.session_state.last_query = query.strip()
@@ -408,13 +489,13 @@ def main():
 
     last_query = st.session_state.get("last_query", "")
     if not last_query or query.strip() != last_query:
-        st.info("Enter a question above to search. Your matching passages will appear here with source details.")
+        st.info("Enter a question above to search. Matching passages from the selected source will appear here.")
         return
     if st.session_state.get("last_settings") != search_settings:
         st.info("Your search options changed. Click **Search** again to refresh these results.")
         return
 
-    results = st.session_state.get("last_results", [])
+        results = st.session_state.get("last_results", [])
     last_method = st.session_state.get("last_method", retrieval_method)
     elapsed_ms = st.session_state.get("last_elapsed_ms", 0.0)
     saved = load_saved_searches()
@@ -433,12 +514,17 @@ def main():
         st.warning("No matching passages found. Try a shorter query or change the advanced source filter.")
         return
 
+    answer_parts = compose_grounded_answer(last_query, results)
+    if not any(part["supported"] for part in answer_parts):
+        st.warning("Not found in the selected source. Try another question or upload a document with relevant information.")
+        st.caption("The retrieved passages did not contain enough matching evidence, so unrelated results are hidden.")
+        return
+
     metric_a, metric_b, metric_c = st.columns(3)
     metric_a.metric("Matches", len(results))
     metric_b.metric("Search method", last_method)
     metric_c.metric("Search time", f"{elapsed_ms:.1f} ms")
 
-    answer_parts = compose_grounded_answer(last_query, results)
     source_names = list(dict.fromkeys(
         str(part["metadata"].get("library") or part["metadata"].get("dataset") or part["metadata"].get("source") or "Library")
         for part in answer_parts if part["supported"]
@@ -459,7 +545,7 @@ def main():
     answer_html = "".join(answer_lines)
     st.markdown(
         f"""<div class="answer-card">
-        <div class="answer-label"><span>✦ &nbsp; Answer from your library</span><span class="pill">{html.escape(source_label)}</span></div>
+        <div class="answer-label"><span>✦ &nbsp; Answer from {"your uploaded files" if search_scope == "Uploaded documents" else "your library"}</span><span class="pill">{html.escape(source_label)}</span></div>
         <div class="answer-text">{answer_html}</div>
         </div>""",
         unsafe_allow_html=True,

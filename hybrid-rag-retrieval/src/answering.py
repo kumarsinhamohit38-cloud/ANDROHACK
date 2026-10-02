@@ -80,6 +80,10 @@ def _best_sentence(terms: list[str], results: list[dict]) -> tuple[str, dict | N
                 continue
 
             coverage = len(overlap) / len(set(terms)) if terms else 0.0
+            # A passage matching only a small fragment of a multi-term facet
+            # is weak evidence and should not be presented as an answer.
+            if len(set(terms)) >= 2 and coverage < 0.5:
+                continue
             is_definition = bool(re.search(
                 r"\b(?:is|are|means|describes|refers to|defined as|occurs when)\b",
                 sentence,

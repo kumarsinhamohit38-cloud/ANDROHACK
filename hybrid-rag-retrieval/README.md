@@ -282,6 +282,21 @@ streamlit run app.py
 
 Open in browser: http://localhost:8501
 
+### Search your own files
+
+In the app sidebar, add a PDF, Word document, CSV, or text/code file (including CSS).
+The app extracts its readable text, splits it into searchable passages, and uses the
+project's embedding model to find relevant passages. Select **Uploaded documents**
+under **Search in**, then ask a question. The results are limited to the uploaded
+files, so they do not mix with the main knowledge library.
+
+Uploads are held in the current app session and are cleared when that session ends
+or when **Clear uploaded files** is selected. PDFs must contain selectable text;
+scanned-image PDFs are not processed because OCR is not enabled.
+
+After installing the updated requirements with `pip install -r requirements.txt`,
+restart the app. No dataset preprocessing or index rebuild is needed for uploads.
+
 ### Features
 
 - **Single method search:** Dense, BM25, or Hybrid RRF
